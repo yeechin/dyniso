@@ -1,11 +1,11 @@
 
 # Makefile Flags for Linux using ICC compiler 
 
-LOCAL = $(HOME)/local
+LOCAL = /opt/local
 
 COMPATH	=
 CXX	= g++-12
-CC	= gcc-12
+CC	= gcc-mp-12
 FC	= gfortran 
 
 override ADDONS := $(ADDONS)
@@ -30,10 +30,11 @@ endif
 
 # FFTW 
 
-FFTDIR  = $(LOCAL)/fftw$(OMP)$(FLOAT)
+#FFTDIR  = $(LOCAL)/fftw$(OMP)$(FLOAT)
+FFTDIR = $(LOCAL)
 FFTINC  = -I$(FFTDIR)/include
 ifdef USE_OPENMP
-FFTLIB  = -L$(FFTDIR)/lib -lrfftw_threads -lfftw_threads -lrfftw -lfftw
+FFTLIB  = -L$(FFTDIR)/lib -ldrfftw_threads -ldfftw_threads -ldrfftw -ldfftw
 else
 FFTLIB  = -L$(FFTDIR)/lib -lrfftw -lfftw
 endif
