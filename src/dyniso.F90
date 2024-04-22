@@ -760,6 +760,54 @@ subroutine post(ul)
 
       return
 end subroutine post
+
+subroutine writeqfile(ul,il)
+      use const
+      use field
+      use timemod
+      implicit none
+      complex :: ul(mx,ny,nz,ndof)
+	  integer :: il
+      integer :: idof, i, j, k
+	  character*80 :: base='out',fname
+
+!.... inverse FFT
+
+      do idof = 1, ndof
+        call fft3d(1, nx, ny, nz, u(1,1,1,idof), mx, ny, coef)
+      end do
+
+!.... output the results in a Plot3d file
+      call makename(base,il,fname)
+      call wdata( fname, ndof, nx, ny, nz, u, zero, zero, &
+                  one/nu, t )
+	  do idof = 1, ndof
+			call fft3d(-1, nx, ny, nz, u(1,1,1,idof), mx, ny, coef)
+	  end do				  
+
+
+      return
+end subroutine writeqfile
+
+subroutine writerestart(ul,il)
+      use const
+      use field
+      use timemod
+      implicit none
+      complex :: ul(mx,ny,nz,ndof)
+      integer :: il
+      integer :: idof, i, j, k
+      character*80 :: base='restart',fname
+      
+!.... save a restart file
+      call makename(base,il,fname)
+
+      open(10,file=fname,form='unformatted')
+      write(10) istep, nx, ny, nz
+      write(10) t, ul
+      close(10)
+      return
+end subroutine writerestart
    
 subroutine euler(ul, rl)
 
@@ -1536,7 +1584,7 @@ subroutine statistics( ul, fl )
 
 !.... compute the band averaged energy spectrum every nout time steps
 
-      if (mod(istep,nout).eq.0 .and. .false.) then
+       if (mod(istep,nout).eq.0 .and. .false.) then
         call makename(base,istep,fname)
         open(10,file=fname)
         write(10,"('# t = ', 1pe13.6)") t
@@ -1865,6 +1913,10 @@ subroutine spectra(n, il, ul, du)
                                        skewness, R_lambda, zero, sum_tek, &
                                        sum_tdk, de
       call flush(22)
+
+      if (mod(il,100).eq.0) then
+        call writerestart(ul,il)
+      end if
 
 !.... output 3d spectra
 
