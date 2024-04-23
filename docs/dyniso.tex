@@ -1,0 +1,52 @@
+\documentclass[10pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage{amsmath}
+\usepackage{amsfonts}
+\usepackage{amssymb}
+\begin{document}
+\section{The undimensional in Dyniso}
+
+In the experiments of Comte-Bellot and Corrsin (1971)\cite{comte-bellot1971} (hereafter called CBC), the grid turbulence has a mesh size of $M=2\,\rm{in}=5.08\,\rm{cm}$. The incoming velocity $U_0=10\,\rm{m/s}$ and thus give a mesh Reynolds number of $Re=U_0M/\nu=34000$ (this relation is used to determine the kinematic viscosity, $\nu\approx 0.149412\,\rm{cm^2/s}$). Energy spectra of the decaying turbulence are recorded at three stations $42M$, $98M$ and $171M$ downstream of the grid. For numerical simulations, we consider the decay in time, and thus the three locations corresponds to three time steps at $t=42M/U_0$, $t=98M/U_0$ and $t=171M/U_0$.
+
+
+To simulate CBC, a non-dimensional strategy should be adopted. The first approach given by Rozema \textit{et al.}\cite{rozema2015,bae} that the reference length is selected to be $L_{ref}=11M=55.88\,\rm{cm}$ and a reference velocity of $u_{ref}=27.19\,\rm{cm/s}$ (more precisely, $u_{ref}=27.1893\,\rm{cm}$), which satisfies $u^2_{ref}=\overline{u^2_1}/2$, with $\overline{u^2_1}=22.2\,\rm{cm/s}$ from CBC. Therefore, $t_{ref}=L_{ref}/u_{ref}$. If we denote the non-dimensional time corresponding to stations $42M$, $98M$ and $171M$ as $t^*_1$, $t^*_2$ and $t^*_3$. Then, $$t^*_1=\frac{42M/U_0}{t_{ref}}\approx 0.1038136$$
+$$t^*_2=\frac{98M/U_0}{t_{ref}}\approx 0.24223819$$
+$$t^*_3=\frac{171M/U_0}{t_{ref}}\approx 0.4226809$$
+Thus, $t^*_2-t^*_1=0.13842219$ and $t^*_3-t^*_1=0.3188649$ (Note that the cutoff digits are selected according to Bae's notes\cite{bae}.) Then the time step is selected to be $\Delta t^*=(t^*_3-t^*_1)/200=0.00159432$. The first run simulates $65$ time steps, then do Kang rescaling, and the second run write results at time steps $87$ (corresponding to $t^*_2$) and $200$ (corresponding to $t^*_3$).
+
+The second approach given by Collis\cite{collis2002} adopted $L_{ref}=10M/2\pi$ and $t_{ref}=64M/U_0$, which then gives $u_{ref}=L_{ref}/t_{ref}\approx 24.87\,\rm{cm/s}$. In later simulations, however, Collis adopted $L_{ref}=55/2\pi\,\rm{cm}$ and same $t_{ref}$. Regardless of the change of $L_{ref}$, the undimensional $t^*_1=42/64=0.66$, $t^*_2=98/64=1.5$ and $t^*_3=171/64=2.7$(the cutoff digits are in accordance with Collis\cite{collis2002} on page 22).
+
+In the code Dyniso (released by Collis), the reference length scale is $L_{ref}=55/2\pi$, while the reference velocity is $u_{ref}=27.1893\,\rm{cm/s}$. The nondimensional viscosity is thus,
+$$\nu^*=\frac{\nu}{u_{ref}L_{ref}}=\frac{U_0M}{34000u_{ref}L_{ref}}=6.27775\times 10^{-4}$$ 
+which is exactly the viscosity setting in the cases shipped with the code Dyniso.
+$$t^*_1=\frac{42M/U_0}{t_{ref}}\approx 0.662717148$$
+$$t^*_2=\frac{98M/U_0}{t_{ref}}\approx 1.546340012$$
+$$t^*_3=\frac{171M/U_0}{t_{ref}}\approx 2.698205531$$
+Thus, $t^*_2-t^*_1=0.883622864$ and $t^*_3-t^*_1=2.035488382$ . We can select the time step to be $\Delta t^*=0.00883622863896731$. Then, we can write results at time steps 100 (corresponding to $t^*_2$) and 230 (corresponding to $t^*_3$).
+
+%%%% Bibliography  %%%%%%%%%%
+\begin{thebibliography}{99}
+
+%\bibitem{Berger}M. J. Berger and P. Collela, Local adaptive mesh refinement
+%for shock hydrodynamics,
+%J. Comput. Phys., 82 (1989), 62-84.
+
+\bibitem{comte-bellot1971}
+{Comte-Bellot, G. and Corrsin S.} 1971 {Simple eulerian time correlation of full-and narrow-band velocity signals in grid-generated, isotropic turbulence.}, {\it J. Fluid Mech. } {\bf 48}, pp. 273-337.
+
+\bibitem{rozema2015}
+{Rozema, W., Bae, H., Moin, P. and Verstappen, R.} 2015 {Minimum-dissipation models for large-eddy-simulation.}, {\it Phys. Fluids } {\bf 27}, pp. 085107.
+
+\bibitem{bae}
+{Bae, W.} {Initial conditions for large-eddy simulation of decaying homogeneous isotropic turbulence}, {\it https://web.stanford.edu/~hjbae/CBC } 
+
+\bibitem{collis2002}
+{Collis, S. Scott} 2002 {Multiscale methods for turbulence simulation and control.}
+
+\end{thebibliography}
+
+\section{miscellanea}
+ \subsection{make to gmake} 
+ 
+
+\end{document}
