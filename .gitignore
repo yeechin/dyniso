@@ -6,3 +6,7 @@ spectra.*
 *.dat
 *.q
 restart.*
+*.aux
+*.pdf
+*.gz
+*.log
