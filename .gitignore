@@ -10,3 +10,7 @@ restart.*
 *.pdf
 *.gz
 *.log
+*.png
+*.psd
+*.mat
+*spectra.*
