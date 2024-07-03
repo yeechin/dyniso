@@ -153,7 +153,7 @@ program dyniso
       call interupt()
 
       call setup()
-
+  
       if (scheme.eq.1) then
         call euler(u, r)     ! Explicit Euler (debugging only)
       else if (scheme.eq.2) then
@@ -195,6 +195,7 @@ subroutine setup
       ndof = 3; ndofles = 8; ictype = 0; seed = 0; kmax = 4.756828460010884; 
       v0 = one; ispec = 1; nout = 50; LES = 1; Cs = 0.16124515
       scheme = 2; cfl=0.0; stats=1
+	  
 
 !.... get namelist input
 
@@ -205,18 +206,20 @@ subroutine setup
 #ifdef VERBOSE
       write(*,in)
 #endif
+     if(LES.lt.0) ndofles = 11
 
-!.... open the output files
 
       if (ictype.eq.2) then
         open(11,file='cpu.dat',position='append',err=100)
         if (LES.eq.2) open(12,file='smag.dat',position='append',err=100)
+		if (LES.eq.-2) open(12,file='coeffliutex.dat',position='append',err=100)
         open(20,file='stat1.dat',position='append',err=100)
         open(21,file='stat2.dat',position='append',err=100)
         open(22,file='screen.dat',position='append',err=100)
       else
         open(11,file='cpu.dat',err=100)
         if (LES.eq.2) open(12,file='smag.dat',err=100)
+		if (LES.eq.-2) open(12,file='coeffliutex.dat',err=100)
         open(20,file='stat1.dat',err=100)
         open(21,file='stat2.dat',err=100)
         open(22,file='screen.dat',err=100)
@@ -443,7 +446,29 @@ subroutine setup
           call error('setup$','Illegal value of LES$')
         end if
       else if (LES.lt.0) then
+        allocate(C(2*mpx,py,pz))
+		if (LES.eq.-1) then
+		  C = Cs
+        else if (LES.eq.-2) then
+		  average = 2; contraction = 1; filter_type = 0; ratio = pt5;
+		  grid_filter = 1
+		  write(*,dynamic)
+		  read(*,dynamic)
+		  write(*,dynamic)
+		  filter_radius = ratio * sqrt(2.0)/3.0
+		  filter_radius_sq = filter_radius**2
+		  alpha_sq = one / ratio**2
+		  alpha = sqrt(alpha_sq)
+          allocate( uh(2*mpx,py,pz,ndofles), Sijh(2*mpx,py,pz,6), &
+                    Lij(2*mpx,py,pz,6), Mij(2*mpx,py,pz,6), &
+                    num(2*mpx,py,pz), den(2*mpx,py,pz), kernel(mpx,py,pz) )
+		  if (filter_type .eq. 3) alpha_sq = 1.5 * alpha_sq
+		  call get_kernel
+        else
         call error('setup$','Illegal value of LES$')
+        end if
+					
+!        call error('setup$','Illegal value of LES$')
       end if
 
       cpu2 = second()
@@ -453,6 +478,7 @@ subroutine setup
 
       return
 100   call error('setup$','Error opening output files$')
+       write(*,*) 'setup 5 end'
 end subroutine setup
 
 subroutine turb(ul, fl)
@@ -748,6 +774,7 @@ subroutine post(ul)
 
       close(20); close(21); close(22); close(11)
       if (LES.eq.2) close(12)
+	  if (LES.eq.-2) close(12)
 
 !.... stop the clock
 
@@ -1007,8 +1034,9 @@ subroutine rhs3d(ul, rl, fl, compute_max, uhl, Sijhl, Lijl, Mijl)
       implicit none
       complex :: ul(mx,ny,nz,ndof), rl(mx,ny,nz,ndof)
       complex :: fl(mpx,py,pz,ndofles), Mijl(mpx,py,pz,6)
-      complex :: uhl(mpx,py,pz,ndof), Sijhl(mpx,py,pz,6), Lijl(mpx,py,pz,6)
+      complex :: uhl(mpx,py,pz,ndofles), Sijhl(mpx,py,pz,6), Lijl(mpx,py,pz,6)
       real    :: rtmp, nu_e, S, Sh, S33
+	  real    :: Rx,Ry,Rz,RR1,RR2
       complex :: ctmp
       integer :: i, j, k, idof, jl, kl
       logical :: compute_max
@@ -1259,6 +1287,276 @@ subroutine rhs3d(ul, rl, fl, compute_max, uhl, Sijhl, Lijl, Mijl)
 !.... convert from anti-aliased 3/2 field to regular field (in place)
 
       call unpad( 2*ndof, nx, ny, nz, px, py, pz, fl )
+	  
+	  else if (LES.lt.0) then
+		  !.... apply the grid filter to the solution (Must do to better match T. Lund)
+
+		        if (LES.eq.-2 .and. grid_filter.eq.1) then
+		          !$omp parallel do private(k,j,i)
+		          do k = 1, nz
+		            do j = 1, ny
+		              do i = 1, mx
+		                if (mask(i,j,k)) then
+		                  ul(i,j,k,1) = zero
+		                  ul(i,j,k,2) = zero
+		                  ul(i,j,k,3) = zero
+		                end if
+		              end do
+		            end do
+		          end do
+		        end if
+		  !.... copy the regular field to an 3/2 field
+		        call pad( ndof, nx, ny, nz, ul, px, py, pz, fl )
+
+		  !.... compute the velocity gradient tensor and put into fl
+		        !$omp parallel do private(k,j,i)
+		        do k = 1, pz
+		          do j = 1, py
+		            do i = 1, mpx
+		              fl(i,j,k,4) = iota * pkx(i) * fl(i,j,k,1)
+					  fl(i,j,k,5) = iota * pky(j) * fl(i,j,k,1)
+					  fl(i,j,k,6) = iota * pkz(k) * fl(i,j,k,1)
+					  
+		              fl(i,j,k,7) = iota * pkx(i) * fl(i,j,k,2)
+					  fl(i,j,k,8) = iota * pky(j) * fl(i,j,k,2)
+					  fl(i,j,k,9) = iota * pkz(k) * fl(i,j,k,2)
+					  
+		              fl(i,j,k,10) = iota * pkx(i) * fl(i,j,k,3)
+					  fl(i,j,k,11) = iota * pky(j) * fl(i,j,k,3)
+		            end do
+		          end do
+		        end do
+				
+				!.... Dynamic model
+
+				      if (LES.eq.-2) then
+
+				!.... Apply the test filter to the velocity and strain-rate
+
+				        !$omp parallel do private(k,j,i)
+				        do k = 1, pz
+				          do j = 1, py
+				            do i = 1, mpx
+				              uhl(i,j,k,1)   = kernel(i,j,k) * fl(i,j,k,1)
+				              uhl(i,j,k,2)   = kernel(i,j,k) * fl(i,j,k,2)
+				              uhl(i,j,k,3)   = kernel(i,j,k) * fl(i,j,k,3)
+							  
+				              uhl(i,j,k,4)   = kernel(i,j,k) * fl(i,j,k,4)
+				              uhl(i,j,k,5)   = kernel(i,j,k) * fl(i,j,k,5)
+				              uhl(i,j,k,6)   = kernel(i,j,k) * fl(i,j,k,6)
+				              uhl(i,j,k,7)   = kernel(i,j,k) * fl(i,j,k,7)
+				              uhl(i,j,k,8)   = kernel(i,j,k) * fl(i,j,k,8)
+				              uhl(i,j,k,9)   = kernel(i,j,k) * fl(i,j,k,9)
+				              uhl(i,j,k,10)   = kernel(i,j,k) * fl(i,j,k,10)
+				              uhl(i,j,k,11)   = kernel(i,j,k) * fl(i,j,k,11)
+							
+				              Sijhl(i,j,k,1) = uhl(i,j,k,4)
+				              Sijhl(i,j,k,2) = uhl(i,j,k,8)
+				              Sijhl(i,j,k,3) = -uhl(i,j,k,4)-uhl(i,j,k,8)
+				              Sijhl(i,j,k,4) = pt5*( uhl(i,j,k,5)+uhl(i,j,k,7))
+				              Sijhl(i,j,k,5) = pt5*( uhl(i,j,k,9)+uhl(i,j,k,11))
+				              Sijhl(i,j,k,6) = pt5*( uhl(i,j,k,6)+uhl(i,j,k,10))
+				            end do
+				          end do
+				        end do
+
+				!.... Inverse FFT of filtered velocity and strain-rate
+
+				        do idof = 1, ndofles
+				          call fft3d(1, px, py, pz, uhl(1,1,1,idof), mpx, py, coefp)
+				        end do
+				        do idof = 1, 6
+				          call fft3d(1, px, py, pz, Sijhl(1,1,1,idof), mpx, py, coefp)
+				        end do
+
+				      end if
+				
+		!.... Inverse FFT of 3/2 field
+
+			  do idof = 1, ndofles
+				     call fft3d(1, px, py, pz, fl(1,1,1,idof), mpx, py, coefp)
+		      end do
+			  
+			  !.... Dynamic model
+
+			        if (LES.eq.-2) then
+
+			  !.... Form Lij, S_mag, S_mag_hat, Mij
+
+			        !$omp parallel do private(k,j,i,S33,Rx,Ry,Rz,RR1,RR2)
+			        do k = 1, pz
+			          do j = 1, py
+			            do i = 1, px
+			              Lij(i,j,k,1) = f(i,j,k,1)**2 - uh(i,j,k,1)**2
+			              Lij(i,j,k,2) = f(i,j,k,2)**2 - uh(i,j,k,2)**2
+			              Lij(i,j,k,3) = f(i,j,k,3)**2 - uh(i,j,k,3)**2
+			              Lij(i,j,k,4) = f(i,j,k,1)*f(i,j,k,2) - uh(i,j,k,1)*uh(i,j,k,2)
+			              Lij(i,j,k,5) = f(i,j,k,2)*f(i,j,k,3) - uh(i,j,k,2)*uh(i,j,k,3)
+			              Lij(i,j,k,6) = f(i,j,k,3)*f(i,j,k,1) - uh(i,j,k,3)*uh(i,j,k,1)
+						  
+						  S33 = -(f(i,j,k,4)+f(i,j,k,8))
+						  call critR(f(i,j,k,4),f(i,j,k,5),f(i,j,k,6),f(i,j,k,7),f(i,j,k,8),&
+						  f(i,j,k,9),f(i,j,k,10),f(i,j,k,11),S33,Rx,Ry,Rz)
+						  RR1 = sqrt(Rx**2+Ry**2+Rz**2)
+						  
+  						  S33 = -(uh(i,j,k,4)+uh(i,j,k,8))
+  						  call critR(uh(i,j,k,4),uh(i,j,k,5),uh(i,j,k,6),uh(i,j,k,7),uh(i,j,k,8),&
+  						  uh(i,j,k,9),uh(i,j,k,10),uh(i,j,k,11),S33,Rx,Ry,Rz)
+  						  RR2 = sqrt(Rx**2+Ry**2+Rz**2)
+
+			              Mij(i,j,k,1) =  alpha_sq * RR2 * Sijh(i,j,k,1) - RR1 * f(i,j,k,4)
+			              Mij(i,j,k,2) =  alpha_sq * RR2 * Sijh(i,j,k,2) - RR1 * f(i,j,k,8)
+			              Mij(i,j,k,3) =  alpha_sq * RR2 * Sijh(i,j,k,3) - RR1 * S33
+			              Mij(i,j,k,4) =  alpha_sq * RR2 * Sijh(i,j,k,4) - RR1 * pt5 * ( f(i,j,k,5)+f(i,j,k,7))
+			              Mij(i,j,k,5) =  alpha_sq * RR2 * Sijh(i,j,k,5) - RR1 * pt5 * ( f(i,j,k,9)+f(i,j,k,11))
+			              Mij(i,j,k,6) =  alpha_sq * RR2 * Sijh(i,j,k,6) - RR1 * pt5 * ( f(i,j,k,6)+f(i,j,k,10))
+			            end do
+			          end do
+			        end do
+
+			  !.... FFT of Lij and Mij
+
+			        do idof = 1, 6
+			          call fft3d(-1, px, py, pz, Lij(1,1,1,idof), mpx, py, coefp)
+			          call fft3d(-1, px, py, pz, Mij(1,1,1,idof), mpx, py, coefp)
+			        end do
+
+			  !.... Filter Lij and Mij
+
+			        !$omp parallel do private(k,idof,j,i)
+			        do k = 1, pz
+			          do idof = 1, 6
+			            do j = 1, py
+			              do i = 1, mpx
+			                Lijl(i,j,k,idof) = kernel(i,j,k) * Lijl(i,j,k,idof)
+			                Mijl(i,j,k,idof) = kernel(i,j,k) * Mijl(i,j,k,idof)
+			              end do
+			            end do
+			          end do
+			        end do
+
+			  !.... Inverse FFT of Lij and Mij
+
+			        do idof = 1, 6
+			          call fft3d(1, px, py, pz, Lij(1,1,1,idof), mpx, py, coefp)
+			          call fft3d(1, px, py, pz, Mij(1,1,1,idof), mpx, py, coefp)
+			        end do
+					
+					
+
+			  !.... Perform contraction
+
+			        if (contraction .eq. 0) then  ! Germano et al.
+			          !$omp parallel do private(k,j,i,S33)
+			          do k = 1, pz
+			            do j = 1, py
+			              do i = 1, px
+			                S33 = -(f(i,j,k,4)+f(i,j,k,8))
+			                num(i,j,k) = Lij(i,j,k,1)*f(i,j,k,4) + Lij(i,j,k,2)*f(i,j,k,8) &
+			                           + Lij(i,j,k,3)*S33 + two * (Lij(i,j,k,4)*(pt5*( f(i,j,k,5)+f(i,j,k,7))) &
+			                           + Lij(i,j,k,5)*(pt5*( f(i,j,k,9)+f(i,j,k,11)))  &
+									   + Lij(i,j,k,6)*(pt5*( f(i,j,k,6)+f(i,j,k,10))))
+			                den(i,j,k) = Mij(i,j,k,1)*f(i,j,k,4) + Mij(i,j,k,2)*f(i,j,k,8) &
+			                           + Mij(i,j,k,3)*S33 + two * (Mij(i,j,k,4)*(pt5*( f(i,j,k,5)+f(i,j,k,7))) &
+			                           + Mij(i,j,k,5)*(pt5*( f(i,j,k,9)+f(i,j,k,11)))  &
+									   + Mij(i,j,k,6)*(pt5*( f(i,j,k,6)+f(i,j,k,10))))
+			              end do
+			            end do
+			          end do
+			        else if ( contraction .eq. 1) then  ! Lilly 
+			          !$omp parallel do private(k,j,i)
+			          do k = 1, pz
+			            do j = 1, py
+			              do i = 1, px
+			                num(i,j,k) = Lij(i,j,k,1) * Mij(i,j,k,1) + &
+			                             Lij(i,j,k,2) * Mij(i,j,k,2) + &
+			                             Lij(i,j,k,3) * Mij(i,j,k,3) + two * ( &
+			                             Lij(i,j,k,4) * Mij(i,j,k,4) + &
+			                             Lij(i,j,k,5) * Mij(i,j,k,5) + &
+			                             Lij(i,j,k,6) * Mij(i,j,k,6) )
+			                den(i,j,k) = Mij(i,j,k,1) * Mij(i,j,k,1) + &
+			                             Mij(i,j,k,2) * Mij(i,j,k,2) + &
+			                             Mij(i,j,k,3) * Mij(i,j,k,3) + two * ( &
+			                             Mij(i,j,k,4) * Mij(i,j,k,4) + &
+			                             Mij(i,j,k,5) * Mij(i,j,k,5) + &
+			                             Mij(i,j,k,6) * Mij(i,j,k,6) )
+			              end do
+			            end do
+			          end do
+			        else
+			          call error("rhs3d$","Illegal value of contraction$")
+			        end if
+
+			  !.... compute C (this needs OpenMP directives)
+
+			        if (average.eq.0) then
+			          C = -pt5 / delta_sq * num / den
+			        else if (average.eq.1) then
+			          do k = 1, pz
+			            C(:,:,k) = -pt5 / delta_sq * sum( num(:,:,k) ) / sum( den(:,:,k) )
+			          end do
+			        else if (average.eq.2) then
+			          C = -pt5 / delta_sq * sum(num)/sum(den)
+			          write(12,"(2(1pe13.6,1x))") t, C(1,1,1)
+			          call flush(12)
+			        else
+			          call error("rhs3d$","Illegal value of average$")
+			        end if
+
+			        end if  ! LES.eq.-2
+			  
+			  
+			  !.... find max velocity for CFL constraint
+
+			        if (compute_max) then
+			          velmax = zero
+			          !$omp parallel do private(k,j,i), reduction(max:velmax)
+			          do k = 1, pz
+			            do j = 1, py
+			              do i = 1, px
+			                velmax = max( velmax, nx*abs(f(i,j,k,1)) + ny*abs(f(i,j,k,2)) + &
+			                              nz*abs(f(i,j,k,3)) )
+			              end do
+			            end do
+			          end do
+			        end if
+       
+			  !.... Form nonlinear products (in physical space)
+
+			        s = zero
+			        !$omp parallel do private(k,j,i,S33,Rx,Ry,Rz,RR1,nu_e)
+			        do k = 1, pz
+			          do j = 1, py
+			            do i = 1, px
+							S33 = -(f(i,j,k,4)+f(i,j,k,8))
+							call critR(f(i,j,k,4),f(i,j,k,5),f(i,j,k,6),f(i,j,k,7),f(i,j,k,8),&
+							f(i,j,k,9),f(i,j,k,10),f(i,j,k,11),S33,Rx,Ry,Rz)
+							RR1 = sqrt(Rx**2+Ry**2+Rz**2)
+							nu_e = C(i,j,k) * delta_sq * RR1
+			              f(i,j,k,5) = f(i,j,k,1) * f(i,j,k,2) -  nu_e * (f(i,j,k,5)+f(i,j,k,7))
+			              f(i,j,k,7) = f(i,j,k,2) * f(i,j,k,3) -  nu_e * (f(i,j,k,9)+f(i,j,k,11))
+			              f(i,j,k,6) = f(i,j,k,1) * f(i,j,k,3) -  nu_e * (f(i,j,k,6)+f(i,j,k,10))
+			              f(i,j,k,1) = f(i,j,k,1) * f(i,j,k,1) -  two * nu_e * f(i,j,k,4)
+			              f(i,j,k,2) = f(i,j,k,2) * f(i,j,k,2) -  two * nu_e * f(i,j,k,8)
+			              f(i,j,k,3) = f(i,j,k,3) * f(i,j,k,3) -  two * nu_e * S33
+                    
+                    f(i,j,k,4) = f(i,j,k,5)
+                    f(i,j,k,5) = f(i,j,k,7)
+			            end do
+			          end do
+			        end do
+
+			  !.... FFT of 3/2 field
+
+			        do idof = 1, 2*ndof
+			          call fft3d(-1, px, py, pz, fl(1,1,1,idof), mpx, py, coefp)
+			        end do
+
+			  !.... convert from anti-aliased 3/2 field to regular field (in place)
+
+			        call unpad( 2*ndof, nx, ny, nz, px, py, pz, fl )
+		  
+		  
      
       else   ! DNS
 
@@ -1584,7 +1882,7 @@ subroutine statistics( ul, fl )
 
 !.... compute the band averaged energy spectrum every nout time steps
 
-       if (mod(istep,nout).eq.0 .and. .false.) then
+      if (mod(istep,nout).eq.0 .and. .false.) then
         call makename(base,istep,fname)
         open(10,file=fname)
         write(10,"('# t = ', 1pe13.6)") t
@@ -1917,7 +2215,7 @@ subroutine spectra(n, il, ul, du)
       if (mod(il,100).eq.0) then
         call writerestart(ul,il)
       end if
-
+	  
 !.... output 3d spectra
 
       if (mod(il,nout).eq.0) then
@@ -2824,3 +3122,155 @@ subroutine makename(base,iver,fname)
 
       return
 end subroutine makename
+
+
+!############################################################################
+!############################################################################
+!!
+!!  SUBROUTINE: critR
+!!      AUTHOR: Yiqian Wang
+!! DESCRIPTION: Calculate the Liutex vector
+!!
+!############################################################################
+subroutine critR(dudx,dudy,dudz,dvdx,dvdy,dvdz,dwdx,dwdy,dwdz,Rx,Ry,Rz)
+  
+  implicit none
+  
+  real,intent(in) :: dudx,dudy,dudz,dvdx,dvdy,dvdz,dwdx,dwdy,dwdz
+  real,intent(out) :: Rx,Ry,Rz
+  
+  real :: a(3,3)
+  
+  real :: aa, bb, cc
+  real :: delta
+  real :: tt(3,3)
+  
+  complex :: eig1c, eig2c
+  real :: eig3r
+  
+  real :: qq, rr
+  real :: aaaa, bbbb
+  
+  real :: vr(3)
+  real :: temp
+  
+  real :: delta1, delta2, delta3
+  
+    a(1,1) = dudx
+    a(1,2) = dudy
+    a(1,3) = dudz
+    a(2,1) = dvdx
+    a(2,2) = dvdy
+    a(2,3) = dvdz
+    a(3,1) = dwdx
+    a(3,2) = dwdy
+    a(3,3) = dwdz
+  
+    !-----------------------------------------------------------------------
+    ! Cubic Formula
+    ! Reference: Numerical Recipes in FORTRAN 77, Second Edition
+    ! 5.6 Quadratic and Cubic Equations
+    ! Page 179
+    !-----------------------------------------------------------------------
+
+    ! cubic equation
+    ! x**3 + aa * x**2 + bb * x + cc = 0
+
+    ! coefficients of characteristic equation 
+    aa = -(a(1,1)+a(2,2)+a(3,3))
+
+    tt = matmul(a,a)
+
+    bb = -0.5*(tt(1,1)+tt(2,2)+tt(3,3)-(a(1,1)+a(2,2)+a(3,3))**2)
+
+    cc = -(a(1,1)*(a(2,2)*a(3,3)-a(2,3)*a(3,2))                            &
+           -a(1,2)*(a(2,1)*a(3,3)-a(2,3)*a(3,1))                           &
+           +a(1,3)*(a(2,1)*a(3,2)-a(2,2)*a(3,1)))
+
+    ! discriminant of characteristic equation
+    delta = 18*aa*bb*cc-4*aa**3*cc+aa**2*bb**2-4*bb**3-27*cc**2
+
+    qq = (aa**2-3*bb)/9.0
+    rr = (2*aa**3-9*aa*bb+27*cc)/54.0
+
+    ! delta = rr**2 - qq**3
+    ! alleviate round error
+    delta = -delta/108
+
+    if(delta > 0.0) then ! one real root and two complex conjugate roots
+
+      aaaa = -sign(1.0, rr)*(abs(rr)+sqrt(delta))**(1.0/3.0)
+
+      if(aaaa == 0.0) then
+        bbbb = 0.0
+      else
+        bbbb = qq/aaaa
+      end if
+
+      eig1c = cmplx(-0.5*(aaaa+bbbb)-aa/3.0, 0.5*sqrt(3.0)*(aaaa-bbbb))
+      eig2c = cmplx(real(eig1c), -aimag(eig1c))
+      eig3r = aaaa+bbbb-aa/3.0
+
+      ! real right eigenvector
+
+      delta1 = (a(1,1)-eig3r)*(a(2,2)-eig3r) - a(2,1)*a(1,2)
+      delta2 = (a(2,2)-eig3r)*(a(3,3)-eig3r) - a(2,3)*a(3,2)
+      delta3 = (a(1,1)-eig3r)*(a(3,3)-eig3r) - a(1,3)*a(3,1)
+
+      if(delta1 == 0.0 .and. delta2 == 0.0 .and. delta3 == 0.0) then
+        write(*,*) 'ERROR: delta1 = delta2 = delta3 = 0.0'
+        write(*,*) a(1,1)-eig3r,  a(1,2),       a(1,3)
+        write(*,*) a(2,1),        a(2,2)-eig3r, a(2,3)
+        write(*,*) a(3,1),        a(3,2),       a(3,3)-eig3r
+        stop
+      end if
+
+      if(abs(delta1) >= abs(delta2) .and.                                  &
+         abs(delta1) >= abs(delta3)) then
+
+        vr(1) = (-(a(2,2)-eig3r)*a(1,3) +         a(1,2)*a(2,3))/delta1
+        vr(2) = (         a(2,1)*a(1,3) - (a(1,1)-eig3r)*a(2,3))/delta1
+        vr(3) = 1.0
+
+      else if(abs(delta2) >= abs(delta1) .and.                             &
+              abs(delta2) >= abs(delta3)) then
+
+        vr(1) = 1.0
+        vr(2) = (-(a(3,3)-eig3r)*a(2,1) +         a(2,3)*a(3,1))/delta2
+        vr(3) = (         a(3,2)*a(2,1) - (a(2,2)-eig3r)*a(3,1))/delta2
+
+      else if(abs(delta3) >= abs(delta1) .and.                             &
+              abs(delta3) >= abs(delta2)) then
+
+         vr(1) = (-(a(3,3)-eig3r)*a(1,2) +         a(1,3)*a(3,2))/delta3
+         vr(2) = 1.0
+         vr(3) = (         a(3,1)*a(1,2) - (a(1,1)-eig3r)*a(3,2))/delta3
+
+      else
+
+        write(*,*) 'ERROR: '
+        write(*,*) delta1, delta2, delta3
+        stop
+
+      end if
+
+      temp = sqrt(vr(1)**2+vr(2)**2+vr(3)**2)
+
+      vr(1) = vr(1)/temp
+      vr(2) = vr(2)/temp
+      vr(3) = vr(3)/temp
+	
+	! Explicit formula by Yiqian Wang Journal of Hydrodynamics 2019
+	temp = (dwdy-dvdz)*vr(1)+(dudz-dwdx)*vr(2)+(dvdx-dudy)*vr(3)
+	temp = temp-sqrt(temp**2-4*(aimag(eig1c))**2)
+	Rx = temp * vr(1)
+	Ry = temp * vr(2)
+	Rz = temp * vr(3)
+else !three real eigenvalues
+	Rx = 0
+	Ry = 0
+	Rz = 0
+endif
+
+  
+end subroutine critR
