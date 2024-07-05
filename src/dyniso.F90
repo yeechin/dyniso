@@ -67,6 +67,7 @@ module field
       real, target, allocatable :: pkx(:), pky(:), pkz(:)
       real, target, allocatable :: u(:,:,:,:), r(:,:,:,:), f(:,:,:,:)
       real, target, allocatable :: coef(:), coefp(:)
+	  real, target, allocatable :: deltaU(:,:,:,:) ! velocity gradient
       integer :: iprint, ictype, dealias, stats
 
 !.... Random number seed
@@ -367,6 +368,8 @@ subroutine setup
       allocate( u(2*mx,ny,nz,ndof), r(2*mx,ny,nz,ndof), &
                 f(2*mpx,py,pz,ndofles), stat=ier )
       if (ier .ne. 0) call error('setup$','Insufficient Memory for fields$')
+	  allocate(deltaU(2*mx,ny,nz,9), stat=ier )
+	  if (ier .ne. 0) call error('setup $', 'Insufficient Memory for Delta U')
 
 !.... initialize data for first-touch memory allocation on O2k, otherwise
 !.... its a good idea to initialize memory anyway!
@@ -806,8 +809,16 @@ subroutine writeqfile(ul,il)
 
 !.... output the results in a Plot3d file
       call makename(base,il,fname)
-      call wdata( fname, ndof, nx, ny, nz, u, zero, zero, &
-                  one/nu, t )
+!      call wdata( fname, ndof, nx, ny, nz, u, zero, zero, &
+!                  one/nu, t )
+!.... output the results in a Plot3d file	  
+      open(10,file=fname,form='unformatted')
+      write(10) int(nx,4), int(ny,4), int(nz,4),int(3,4)
+      write(10) &
+        ((( real(u(i,j,k,1),4), i=1,nx), j=1,ny), k=1,nz ), &
+        ((( real(u(i,j,k,2),4), i=1,nx), j=1,ny), k=1,nz ), &
+        ((( real(u(i,j,k,3),4), i=1,nx), j=1,ny), k=1,nz )
+      close(10)
 	  do idof = 1, ndof
 			call fft3d(-1, nx, ny, nz, u(1,1,1,idof), mx, ny, coef)
 	  end do				  
@@ -815,6 +826,76 @@ subroutine writeqfile(ul,il)
 
       return
 end subroutine writeqfile
+
+subroutine writeLiutex(ul,dU,il)
+      use const
+      use field
+      use timemod
+      implicit none
+      complex :: ul(mx,ny,nz,ndof)
+	  complex :: dU(mx,ny,nz,9)
+	  integer :: il
+      integer :: idof, i, j, k
+	  real    :: Rx,Ry,Rz,S33
+	  character*80 :: base='liutex',fname
+	  
+	  !$omp parallel do private(k,j,i)
+      do k = 1, nz
+        do j = 1, ny
+          do i = 1, mx
+            dU(i,j,k,1) = iota * kx(i) * ul(i,j,k,1)
+		    dU(i,j,k,2) = iota * ky(j) * ul(i,j,k,1)
+		    dU(i,j,k,3) = iota * kz(k) * ul(i,j,k,1)
+		  
+            dU(i,j,k,4) = iota * kx(i) * ul(i,j,k,2)
+		    dU(i,j,k,5) = iota * ky(j) * ul(i,j,k,2)
+		    dU(i,j,k,6) = iota * kz(k) * ul(i,j,k,2)
+		  
+            dU(i,j,k,7) = iota * kx(i) * ul(i,j,k,3)
+		    dU(i,j,k,8) = iota * ky(j) * ul(i,j,k,3)
+          end do
+        end do
+      end do
+	  
+      do idof = 1, 8
+        call fft3d(1, nx, ny, nz, deltaU(1,1,1,idof), mx, ny, coef)
+      end do
+	  
+      do k = 1, nz
+        do j = 1, ny
+          do i = 1, nx
+			S33 = -(deltaU(i,j,k,1)+deltaU(i,j,k,5))
+			call critR(deltaU(i,j,k,1),deltaU(i,j,k,2),deltaU(i,j,k,3),&
+			deltaU(i,j,k,4),deltaU(i,j,k,5),deltaU(i,j,k,6),&
+			deltaU(i,j,k,7),deltaU(i,j,k,8),S33,Rx,Ry,Rz)
+			
+			deltaU(i,j,k,1) = Rx
+			deltaU(i,j,k,2) = Ry
+			deltaU(i,j,k,3) = Rz		
+          end do
+        end do
+      end do
+	  
+!.... output the results in a Plot3d file	  
+	  call makename(base,il,fname)
+      open(10,file=fname,form='unformatted')
+      write(10) int(nx,4), int(ny,4), int(nz,4),int(3,4)
+      write(10) &
+	    ((( real(deltaU(i,j,k,1),4), i=1,nx), j=1,ny), k=1,nz ), &
+        ((( real(deltaU(i,j,k,2),4), i=1,nx), j=1,ny), k=1,nz ), &
+        ((( real(deltaU(i,j,k,3),4), i=1,nx), j=1,ny), k=1,nz )
+ !       ((( real(f(i,j,k,3),4), i=1,nx), j=1,ny), k=1,nz )
+      close(10)	  
+!	  call fft3d(-1, nx, ny, nz, u(1,1,1,1), mx, ny, coef)
+!      do k = 1, nz
+!        do j = 1, ny
+!          do i = 1, mx
+!			  if(kx(i).ne.0) ul(i,j,k,1) =  ul(i,j,k,1)/iota/kx(i)
+!          end do
+!        end do
+!      end do
+      return
+end subroutine writeLiutex
 
 subroutine writerestart(ul,il)
       use const
@@ -2214,6 +2295,8 @@ subroutine spectra(n, il, ul, du)
 
       if (mod(il,100).eq.0) then
         call writerestart(ul,il)
+		call writeqfile(ul,il)
+		call writeliutex(ul,deltaU,il)
       end if
 	  
 !.... output 3d spectra
