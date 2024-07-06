@@ -836,7 +836,7 @@ subroutine writeVortexCrit(ul,dU,il)
 	  complex :: dU(mx,ny,nz,9)
 	  integer :: il
       integer :: idof, i, j, k
-	  real    :: Rx,Ry,Rz,S33, Q, lambdaCi
+	  real    :: Rx,Ry,Rz,S33, Q, lambdaCi, Delta, lambda2
 	  character*80 :: base='vortex',fname
 	  
 	  !$omp parallel do private(k,j,i)
@@ -880,6 +880,14 @@ subroutine writeVortexCrit(ul,dU,il)
 			deltaU(i,j,k,4),deltaU(i,j,k,5),deltaU(i,j,k,6), &
 			deltaU(i,j,k,7),deltaU(i,j,k,8),S33,lambdaCi)	
 			
+			call critDelta(deltaU(i,j,k,1),deltaU(i,j,k,2),deltaU(i,j,k,3), &
+			deltaU(i,j,k,4),deltaU(i,j,k,5),deltaU(i,j,k,6), &
+			deltaU(i,j,k,7),deltaU(i,j,k,8),S33,Delta)
+			
+			call critLambda2(deltaU(i,j,k,1),deltaU(i,j,k,2),deltaU(i,j,k,3), &
+			deltaU(i,j,k,4),deltaU(i,j,k,5),deltaU(i,j,k,6), &
+			deltaU(i,j,k,7),deltaU(i,j,k,8),S33,lambda2)
+			
 			deltaU(i,j,k,1) = Rx
 			deltaU(i,j,k,2) = Ry
 			deltaU(i,j,k,3) = Rz
@@ -887,6 +895,10 @@ subroutine writeVortexCrit(ul,dU,il)
 			deltaU(i,j,k,4) = Q
 			
 			deltaU(i,j,k,5) = lambdaCi
+			
+			deltaU(i,j,k,6) = Delta
+			
+			deltaU(i,j,k,7) = lambda2
           end do
         end do
       end do
@@ -894,13 +906,15 @@ subroutine writeVortexCrit(ul,dU,il)
 !.... output the results in a Plot3d file	  
 	  call makename(base,il,fname)
       open(10,file=fname,form='unformatted')
-      write(10) int(nx,4), int(ny,4), int(nz,4),int(5,4)
+      write(10) int(nx,4), int(ny,4), int(nz,4),int(7,4)
       write(10) &
 	    ((( real(deltaU(i,j,k,1),4), i=1,nx), j=1,ny), k=1,nz ), &
         ((( real(deltaU(i,j,k,2),4), i=1,nx), j=1,ny), k=1,nz ), &
         ((( real(deltaU(i,j,k,3),4), i=1,nx), j=1,ny), k=1,nz ), &
 		((( real(deltaU(i,j,k,4),4), i=1,nx), j=1,ny), k=1,nz ), &
-		((( real(deltaU(i,j,k,5),4), i=1,nx), j=1,ny), k=1,nz )
+		((( real(deltaU(i,j,k,5),4), i=1,nx), j=1,ny), k=1,nz ), &
+		((( real(deltaU(i,j,k,6),4), i=1,nx), j=1,ny), k=1,nz ), &
+		((( real(deltaU(i,j,k,7),4), i=1,nx), j=1,ny), k=1,nz )
 ! Liutex, Q, lambda_ci		
       close(10)	  
 
@@ -3479,3 +3493,183 @@ subroutine critLambdaCi(dudx,dudy,dudz,dvdx,dvdy,dvdz,dwdx,dwdy,dwdz,lambdaci)
     endif
 	  
 end subroutine critLambdaCi
+
+!############################################################################
+!############################################################################
+!!
+!!  SUBROUTINE: critDelta
+!!      AUTHOR: Yiqian Wang
+!! DESCRIPTION: Calculate the Delta criterion
+!!
+!############################################################################
+subroutine critDelta(dudx,dudy,dudz,dvdx,dvdy,dvdz,dwdx,dwdy,dwdz,Delta)
+  
+  implicit none
+  
+  real,intent(in) :: dudx,dudy,dudz,dvdx,dvdy,dvdz,dwdx,dwdy,dwdz
+  real,intent(out) :: Delta
+  
+  real :: a(3,3)
+  
+  real :: aa, bb, cc
+  real :: tt(3,3)
+  
+  complex :: eig1c, eig2c
+  real :: eig3r
+  
+  real :: qq, rr
+  real :: aaaa, bbbb  
+  
+    a(1,1) = dudx
+    a(1,2) = dudy
+    a(1,3) = dudz
+    a(2,1) = dvdx
+    a(2,2) = dvdy
+    a(2,3) = dvdz
+    a(3,1) = dwdx
+    a(3,2) = dwdy
+    a(3,3) = dwdz
+  
+    !-----------------------------------------------------------------------
+    ! Cubic Formula
+    ! Reference: Numerical Recipes in FORTRAN 77, Second Edition
+    ! 5.6 Quadratic and Cubic Equations
+    ! Page 179
+    !-----------------------------------------------------------------------
+
+    ! cubic equation
+    ! x**3 + aa * x**2 + bb * x + cc = 0
+
+    ! coefficients of characteristic equation 
+    aa = -(a(1,1)+a(2,2)+a(3,3))
+
+    tt = matmul(a,a)
+
+    bb = -0.5*(tt(1,1)+tt(2,2)+tt(3,3)-(a(1,1)+a(2,2)+a(3,3))**2)
+
+    cc = -(a(1,1)*(a(2,2)*a(3,3)-a(2,3)*a(3,2))                            &
+           -a(1,2)*(a(2,1)*a(3,3)-a(2,3)*a(3,1))                           &
+           +a(1,3)*(a(2,1)*a(3,2)-a(2,2)*a(3,1)))
+
+    ! discriminant of characteristic equation
+    Delta = 18*aa*bb*cc-4*aa**3*cc+aa**2*bb**2-4*bb**3-27*cc**2
+
+    ! delta = rr**2 - qq**3
+    ! alleviate round error
+    Delta = -Delta/108
+
+end subroutine critDelta
+
+!############################################################################
+!############################################################################
+!!
+!!  SUBROUTINE: critLambda2
+!!      AUTHOR: Yiqian Wang
+!! DESCRIPTION: Calculate the lambda2 criterion
+!!
+!############################################################################
+subroutine critLambda2(dudx,dudy,dudz,dvdx,dvdy,dvdz,dwdx,dwdy,dwdz,lambda2)
+  use const
+  implicit none
+  
+  real,intent(in) :: dudx,dudy,dudz,dvdx,dvdy,dvdz,dwdx,dwdy,dwdz
+  real,intent(out) :: lambda2
+  
+  real :: A(3,3), B(3,3), AB(3,3)
+  
+  real :: aa, bb, cc
+  real :: delta
+  real :: tt(3,3)
+  
+  real :: eig1, eig2, eig3
+  
+  real :: qq, rr
+  real :: aaaa, bbbb
+  
+  real :: theta
+
+  
+  !symmteric part of the velocity graident tensor
+    A(1,1) = dudx
+    A(1,2) = 0.5*(dudy+dvdx)
+    A(1,3) = 0.5*(dudz+dwdx)
+    A(2,1) = A(1,2)
+    A(2,2) = dvdy
+    A(2,3) = 0.5*(dvdz+dwdy)
+    A(3,1) = A(1,3)
+    A(3,2) = A(2,3)
+    A(3,3) = dwdz
+    !anti-symmteric part of the velocity graident tensor
+    B(1,1) = 0
+    B(1,2) = 0.5*(dudy-dvdx)
+    B(1,3) = 0.5*(dudz-dwdx)
+    B(2,1) = -B(1,2)
+    B(2,2) = 0
+    B(2,3) = 0.5*(dvdz-dwdy)
+    B(3,1) = -B(1,3)
+    B(3,2) = -B(2,3)
+    B(3,3) = 0
+	!form the symmetric matrix A^2+B^2
+	AB = matmul(A,A) + matmul(B,B)
+	
+  
+    !-----------------------------------------------------------------------
+    ! Cubic Formula
+    ! Reference: Numerical Recipes in FORTRAN 77, Second Edition
+    ! 5.6 Quadratic and Cubic Equations
+    ! Page 179
+    !-----------------------------------------------------------------------
+
+    ! cubic equation
+    ! x**3 + aa * x**2 + bb * x + cc = 0
+
+    ! coefficients of characteristic equation 
+    aa = -(AB(1,1)+AB(2,2)+AB(3,3))
+
+    tt = matmul(AB,AB)
+
+    bb = -0.5*(tt(1,1)+tt(2,2)+tt(3,3)-(AB(1,1)+AB(2,2)+AB(3,3))**2)
+
+    cc = -(AB(1,1)*(AB(2,2)*AB(3,3)-AB(2,3)*AB(3,2))                            &
+           -AB(1,2)*(AB(2,1)*AB(3,3)-AB(2,3)*AB(3,1))                           &
+           +AB(1,3)*(AB(2,1)*AB(3,2)-AB(2,2)*AB(3,1)))
+
+    ! discriminant of characteristic equation
+    delta = 18*aa*bb*cc-4*aa**3*cc+aa**2*bb**2-4*bb**3-27*cc**2
+
+    qq = (aa**2-3*bb)/9.0
+    rr = (2*aa**3-9*aa*bb+27*cc)/54.0
+
+    ! delta = rr**2 - qq**3
+    ! alleviate round error
+    delta = -delta/108
+
+    if(delta < 0.0) then !three real eigenvalues
+		theta = acos(rr/sqrt(qq**3))
+		eig1 = -2*sqrt(qq)*cos(theta/3)-aa/3
+		eig2 = -2*sqrt(qq)*cos((theta+2*pi)/3)-aa/3
+		eig3 = -2*sqrt(qq)*cos((theta-2*pi)/3)-aa/3
+	else ! one real root and two complex conjugate roots
+		call error('critLambda2$','Symmetric matrix only has real eigenvalues$')
+    endif
+	
+	if(eig1<eig2) then
+		if(eig1>eig3) then
+			lambda2 = eig1
+	    else if (eig2<eig3) then
+			lambda2 = eig2
+		else
+			lambda2 = eig3
+		end if
+	else
+		if(eig3>eig1) then
+			lambda2 = eig1
+		else if(eig2>eig3) then
+			lambda2 = eig2
+		else
+			lambda2 = eig3
+		end if
+	end if
+
+
+end subroutine critLambda2
