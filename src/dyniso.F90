@@ -827,7 +827,7 @@ subroutine writeqfile(ul,il)
       return
 end subroutine writeqfile
 
-subroutine writeLiutex(ul,dU,il)
+subroutine writeVortexCrit(ul,dU,il)
       use const
       use field
       use timemod
@@ -836,8 +836,8 @@ subroutine writeLiutex(ul,dU,il)
 	  complex :: dU(mx,ny,nz,9)
 	  integer :: il
       integer :: idof, i, j, k
-	  real    :: Rx,Ry,Rz,S33
-	  character*80 :: base='liutex',fname
+	  real    :: Rx,Ry,Rz,S33, Q, lambdaCi
+	  character*80 :: base='vortex',fname
 	  
 	  !$omp parallel do private(k,j,i)
       do k = 1, nz
@@ -869,9 +869,24 @@ subroutine writeLiutex(ul,dU,il)
 			deltaU(i,j,k,4),deltaU(i,j,k,5),deltaU(i,j,k,6),&
 			deltaU(i,j,k,7),deltaU(i,j,k,8),S33,Rx,Ry,Rz)
 			
+!			Q = -0.5 * (deltaU(i,j,k,1)**2+ deltaU(i,j,k,5)**2+S33**2) - &
+!			deltaU(i,j,k,2)*deltaU(i,j,k,4) - deltaU(i,j,k,3)*deltaU(i,j,k,7) &
+!			- deltaU(i,j,k,6)*deltaU(i,j,k,8)
+            call critQ(deltaU(i,j,k,1),deltaU(i,j,k,2),deltaU(i,j,k,3), &
+			deltaU(i,j,k,4),deltaU(i,j,k,5),deltaU(i,j,k,6), &
+			deltaU(i,j,k,7),deltaU(i,j,k,8),S33,Q)	
+			
+			call critLambdaCi(deltaU(i,j,k,1),deltaU(i,j,k,2),deltaU(i,j,k,3), &
+			deltaU(i,j,k,4),deltaU(i,j,k,5),deltaU(i,j,k,6), &
+			deltaU(i,j,k,7),deltaU(i,j,k,8),S33,lambdaCi)	
+			
 			deltaU(i,j,k,1) = Rx
 			deltaU(i,j,k,2) = Ry
-			deltaU(i,j,k,3) = Rz		
+			deltaU(i,j,k,3) = Rz
+			
+			deltaU(i,j,k,4) = Q
+			
+			deltaU(i,j,k,5) = lambdaCi
           end do
         end do
       end do
@@ -879,23 +894,18 @@ subroutine writeLiutex(ul,dU,il)
 !.... output the results in a Plot3d file	  
 	  call makename(base,il,fname)
       open(10,file=fname,form='unformatted')
-      write(10) int(nx,4), int(ny,4), int(nz,4),int(3,4)
+      write(10) int(nx,4), int(ny,4), int(nz,4),int(5,4)
       write(10) &
 	    ((( real(deltaU(i,j,k,1),4), i=1,nx), j=1,ny), k=1,nz ), &
         ((( real(deltaU(i,j,k,2),4), i=1,nx), j=1,ny), k=1,nz ), &
-        ((( real(deltaU(i,j,k,3),4), i=1,nx), j=1,ny), k=1,nz )
- !       ((( real(f(i,j,k,3),4), i=1,nx), j=1,ny), k=1,nz )
+        ((( real(deltaU(i,j,k,3),4), i=1,nx), j=1,ny), k=1,nz ), &
+		((( real(deltaU(i,j,k,4),4), i=1,nx), j=1,ny), k=1,nz ), &
+		((( real(deltaU(i,j,k,5),4), i=1,nx), j=1,ny), k=1,nz )
+! Liutex, Q, lambda_ci		
       close(10)	  
-!	  call fft3d(-1, nx, ny, nz, u(1,1,1,1), mx, ny, coef)
-!      do k = 1, nz
-!        do j = 1, ny
-!          do i = 1, mx
-!			  if(kx(i).ne.0) ul(i,j,k,1) =  ul(i,j,k,1)/iota/kx(i)
-!          end do
-!        end do
-!      end do
+
       return
-end subroutine writeLiutex
+end subroutine writeVortexCrit
 
 subroutine writerestart(ul,il)
       use const
@@ -2296,7 +2306,7 @@ subroutine spectra(n, il, ul, du)
       if (mod(il,100).eq.0) then
         call writerestart(ul,il)
 		call writeqfile(ul,il)
-		call writeliutex(ul,deltaU,il)
+		call writeVortexCrit(ul,deltaU,il)
       end if
 	  
 !.... output 3d spectra
@@ -3357,3 +3367,115 @@ endif
 
   
 end subroutine critR
+
+!############################################################################
+!############################################################################
+!!
+!!  SUBROUTINE: critQ
+!!      AUTHOR: Yiqian Wang
+!! DESCRIPTION: Calculate the Q criterion
+!!
+!############################################################################
+subroutine critQ(dudx,dudy,dudz,dvdx,dvdy,dvdz,dwdx,dwdy,dwdz,Q)
+  
+  implicit none
+  
+  real,intent(in) :: dudx,dudy,dudz,dvdx,dvdy,dvdz,dwdx,dwdy,dwdz
+  real,intent(out) :: Q
+  
+   Q = -0.5 * (dudx**2+ dvdy**2+dwdz**2) - &
+      dudy*dvdx - dudz*dwdx - dvdz*dwdy
+  
+
+end subroutine critQ
+
+!############################################################################
+!############################################################################
+!!
+!!  SUBROUTINE: critLambdaCi
+!!      AUTHOR: Yiqian Wang
+!! DESCRIPTION: Calculate the lambda_ci criterion
+!!
+!############################################################################
+subroutine critLambdaCi(dudx,dudy,dudz,dvdx,dvdy,dvdz,dwdx,dwdy,dwdz,lambdaci)
+  
+  implicit none
+  
+  real,intent(in) :: dudx,dudy,dudz,dvdx,dvdy,dvdz,dwdx,dwdy,dwdz
+  real,intent(out) :: lambdaCi
+  
+  real :: a(3,3)
+  
+  real :: aa, bb, cc
+  real :: delta
+  real :: tt(3,3)
+  
+  complex :: eig1c, eig2c
+  real :: eig3r
+  
+  real :: qq, rr
+  real :: aaaa, bbbb
+  
+  real :: vr(3)
+  real :: temp
+  
+  real :: delta1, delta2, delta3
+  
+    a(1,1) = dudx
+    a(1,2) = dudy
+    a(1,3) = dudz
+    a(2,1) = dvdx
+    a(2,2) = dvdy
+    a(2,3) = dvdz
+    a(3,1) = dwdx
+    a(3,2) = dwdy
+    a(3,3) = dwdz
+  
+    !-----------------------------------------------------------------------
+    ! Cubic Formula
+    ! Reference: Numerical Recipes in FORTRAN 77, Second Edition
+    ! 5.6 Quadratic and Cubic Equations
+    ! Page 179
+    !-----------------------------------------------------------------------
+
+    ! cubic equation
+    ! x**3 + aa * x**2 + bb * x + cc = 0
+
+    ! coefficients of characteristic equation 
+    aa = -(a(1,1)+a(2,2)+a(3,3))
+
+    tt = matmul(a,a)
+
+    bb = -0.5*(tt(1,1)+tt(2,2)+tt(3,3)-(a(1,1)+a(2,2)+a(3,3))**2)
+
+    cc = -(a(1,1)*(a(2,2)*a(3,3)-a(2,3)*a(3,2))                            &
+           -a(1,2)*(a(2,1)*a(3,3)-a(2,3)*a(3,1))                           &
+           +a(1,3)*(a(2,1)*a(3,2)-a(2,2)*a(3,1)))
+
+    ! discriminant of characteristic equation
+    delta = 18*aa*bb*cc-4*aa**3*cc+aa**2*bb**2-4*bb**3-27*cc**2
+
+    qq = (aa**2-3*bb)/9.0
+    rr = (2*aa**3-9*aa*bb+27*cc)/54.0
+
+    ! delta = rr**2 - qq**3
+    ! alleviate round error
+    delta = -delta/108
+
+    if(delta > 0.0) then ! one real root and two complex conjugate roots
+
+      aaaa = -sign(1.0, rr)*(abs(rr)+sqrt(delta))**(1.0/3.0)
+
+      if(aaaa == 0.0) then
+        bbbb = 0.0
+      else
+        bbbb = qq/aaaa
+      end if
+
+      eig1c = cmplx(-0.5*(aaaa+bbbb)-aa/3.0, 0.5*sqrt(3.0)*(aaaa-bbbb))
+	  lambdaCi = abs(aimag(eig1c))
+    else !three real eigenvalues
+	  lambdaCi = 0
+    endif
+	  
+end subroutine critLambdaCi
