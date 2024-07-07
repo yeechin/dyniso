@@ -214,6 +214,10 @@ subroutine setup
         open(11,file='cpu.dat',position='append',err=100)
         if (LES.eq.2) open(12,file='smag.dat',position='append',err=100)
 		if (LES.eq.-2) open(12,file='coeffliutex.dat',position='append',err=100)
+		if (LES.eq.-4) open(12,file='coeffQ.dat',position='append',err=100)
+		if (LES.eq.-6) open(12,file='coeffLambdaCi.dat',position='append',err=100)
+		if (LES.eq.-8) open(12,file='coeffDelta.dat',position='append',err=100)
+		if (LES.eq.-10) open(12,file='coeffLambda2.dat',position='append',err=100)
         open(20,file='stat1.dat',position='append',err=100)
         open(21,file='stat2.dat',position='append',err=100)
         open(22,file='screen.dat',position='append',err=100)
@@ -221,6 +225,10 @@ subroutine setup
         open(11,file='cpu.dat',err=100)
         if (LES.eq.2) open(12,file='smag.dat',err=100)
 		if (LES.eq.-2) open(12,file='coeffliutex.dat',err=100)
+		if (LES.eq.-4) open(12,file='coeffQ.dat',err=100)
+		if (LES.eq.-6) open(12,file='coeffLambdaCi.dat',err=100)
+		if (LES.eq.-8) open(12,file='coeffDelta.dat',err=100)
+		if (LES.eq.-10) open(12,file='coeffLambda2.dat',err=100)
         open(20,file='stat1.dat',err=100)
         open(21,file='stat2.dat',err=100)
         open(22,file='screen.dat',err=100)
@@ -450,9 +458,14 @@ subroutine setup
         end if
       else if (LES.lt.0) then
         allocate(C(2*mpx,py,pz))
-		if (LES.eq.-1) then
+		! mod(-3,2) = -1
+		if (mod(LES,2).eq.-1) then ! constant model coefficient version
+			! -1: Liutex based; -3: Q based; -5 lambda_ci based;
+			! -7: Delta based; -9: lambda2 based 
 		  C = Cs
-        else if (LES.eq.-2) then
+        else if (mod(LES,2).eq.0) then ! dynamic version
+			! -2: Liutex based; -4: Q based; -6 lambda_ci based;
+			! -8: Delta based; -10: lambda2 based 
 		  average = 2; contraction = 1; filter_type = 0; ratio = pt5;
 		  grid_filter = 1
 		  write(*,dynamic)
@@ -777,7 +790,7 @@ subroutine post(ul)
 
       close(20); close(21); close(22); close(11)
       if (LES.eq.2) close(12)
-	  if (LES.eq.-2) close(12)
+	  if (LES.lt.0 .AND. mod(LES,2).eq.0) close(12)
 
 !.... stop the clock
 
@@ -1142,6 +1155,7 @@ subroutine rhs3d(ul, rl, fl, compute_max, uhl, Sijhl, Lijl, Mijl)
       complex :: uhl(mpx,py,pz,ndofles), Sijhl(mpx,py,pz,6), Lijl(mpx,py,pz,6)
       real    :: rtmp, nu_e, S, Sh, S33
 	  real    :: Rx,Ry,Rz,RR1,RR2
+	  real    :: Q, lambdaCi, Delta, lambda2
       complex :: ctmp
       integer :: i, j, k, idof, jl, kl
       logical :: compute_max
@@ -1396,7 +1410,7 @@ subroutine rhs3d(ul, rl, fl, compute_max, uhl, Sijhl, Lijl, Mijl)
 	  else if (LES.lt.0) then
 		  !.... apply the grid filter to the solution (Must do to better match T. Lund)
 
-		        if (LES.eq.-2 .and. grid_filter.eq.1) then
+		        if (mod(LES,2).eq.0 .and. grid_filter.eq.1) then
 		          !$omp parallel do private(k,j,i)
 		          do k = 1, nz
 		            do j = 1, ny
@@ -1434,7 +1448,7 @@ subroutine rhs3d(ul, rl, fl, compute_max, uhl, Sijhl, Lijl, Mijl)
 				
 				!.... Dynamic model
 
-				      if (LES.eq.-2) then
+				      if (mod(LES,2).eq.0) then
 
 				!.... Apply the test filter to the velocity and strain-rate
 
@@ -1484,11 +1498,11 @@ subroutine rhs3d(ul, rl, fl, compute_max, uhl, Sijhl, Lijl, Mijl)
 			  
 			  !.... Dynamic model
 
-			        if (LES.eq.-2) then
+			        if (mod(LES,2).eq.0) then
 
 			  !.... Form Lij, S_mag, S_mag_hat, Mij
 
-			        !$omp parallel do private(k,j,i,S33,Rx,Ry,Rz,RR1,RR2)
+			        !$omp parallel do private(k,j,i,S33,Rx,Ry,Rz,Q,lambdaCi,Delta,lambda2,RR1,RR2)
 			        do k = 1, pz
 			          do j = 1, py
 			            do i = 1, px
@@ -1500,14 +1514,54 @@ subroutine rhs3d(ul, rl, fl, compute_max, uhl, Sijhl, Lijl, Mijl)
 			              Lij(i,j,k,6) = f(i,j,k,3)*f(i,j,k,1) - uh(i,j,k,3)*uh(i,j,k,1)
 						  
 						  S33 = -(f(i,j,k,4)+f(i,j,k,8))
-						  call critR(f(i,j,k,4),f(i,j,k,5),f(i,j,k,6),f(i,j,k,7),f(i,j,k,8),&
-						  f(i,j,k,9),f(i,j,k,10),f(i,j,k,11),S33,Rx,Ry,Rz)
-						  RR1 = sqrt(Rx**2+Ry**2+Rz**2)
+						  if(LES.eq.-2) then
+							  call critR(f(i,j,k,4),f(i,j,k,5),f(i,j,k,6),f(i,j,k,7),f(i,j,k,8),&
+						           f(i,j,k,9),f(i,j,k,10),f(i,j,k,11),S33,Rx,Ry,Rz)
+						      RR1 = sqrt(Rx**2+Ry**2+Rz**2)
+						  else if(LES.eq.-4) then
+							  call critQ(f(i,j,k,4),f(i,j,k,5),f(i,j,k,6),f(i,j,k,7),f(i,j,k,8),&
+						           f(i,j,k,9),f(i,j,k,10),f(i,j,k,11),S33,Q)
+							  RR1 = sqrt( max(0.,Q) )
+						  else if(LES.eq.-6) then
+							  call critLambdaCi(f(i,j,k,4),f(i,j,k,5),f(i,j,k,6),f(i,j,k,7),f(i,j,k,8),&
+						           f(i,j,k,9),f(i,j,k,10),f(i,j,k,11),S33,lambdaCi)
+							  RR1 = lambdaCi
+						  else if(LES.eq.-8) then
+							  call critDelta(f(i,j,k,4),f(i,j,k,5),f(i,j,k,6),f(i,j,k,7),f(i,j,k,8),&
+							       f(i,j,k,9),f(i,j,k,10),f(i,j,k,11),S33,Delta)
+							  RR1 = (max(0.,Delta))**(1./6.)
+						  else if(LES.eq.-10) then
+							  call critLambda2(f(i,j,k,4),f(i,j,k,5),f(i,j,k,6),f(i,j,k,7),f(i,j,k,8),&
+								   f(i,j,k,9),f(i,j,k,10),f(i,j,k,11),S33,lambda2)
+							  RR1 = sqrt(max(0.,-lambda2))
+						  else
+							  call error('rhs3d$','Illegal value of LES$')
+						  end if
 						  
   						  S33 = -(uh(i,j,k,4)+uh(i,j,k,8))
-  						  call critR(uh(i,j,k,4),uh(i,j,k,5),uh(i,j,k,6),uh(i,j,k,7),uh(i,j,k,8),&
-  						  uh(i,j,k,9),uh(i,j,k,10),uh(i,j,k,11),S33,Rx,Ry,Rz)
-  						  RR2 = sqrt(Rx**2+Ry**2+Rz**2)
+						  if(LES.eq.-2) then
+							  call critR(uh(i,j,k,4),uh(i,j,k,5),uh(i,j,k,6),uh(i,j,k,7),uh(i,j,k,8),&
+  						           uh(i,j,k,9),uh(i,j,k,10),uh(i,j,k,11),S33,Rx,Ry,Rz)
+  						      RR2 = sqrt(Rx**2+Ry**2+Rz**2)
+						  else if(LES.eq.-4) then
+							  call critQ(uh(i,j,k,4),uh(i,j,k,5),uh(i,j,k,6),uh(i,j,k,7),uh(i,j,k,8),&
+  						           uh(i,j,k,9),uh(i,j,k,10),uh(i,j,k,11),S33,Q)
+							  RR2 = sqrt(max(0.,Q))
+						  else if(LES.eq.-6) then
+							  call critLambdaCi(uh(i,j,k,4),uh(i,j,k,5),uh(i,j,k,6),uh(i,j,k,7),uh(i,j,k,8),&
+  						           uh(i,j,k,9),uh(i,j,k,10),uh(i,j,k,11),S33,lambdaCi)
+							  RR2 = lambdaCi
+						  else if(LES.eq.-8) then
+							  call critDelta(uh(i,j,k,4),uh(i,j,k,5),uh(i,j,k,6),uh(i,j,k,7),uh(i,j,k,8),&
+  						           uh(i,j,k,9),uh(i,j,k,10),uh(i,j,k,11),S33,Delta)
+							  RR2 = (max(0.,Delta))**(1./6.)
+						  else if(LES.eq.-10) then
+							  call critLambda2(uh(i,j,k,4),uh(i,j,k,5),uh(i,j,k,6),uh(i,j,k,7),uh(i,j,k,8),&
+  						           uh(i,j,k,9),uh(i,j,k,10),uh(i,j,k,11),S33,lambda2)
+							  RR2 = sqrt(max(0.,-lambda2))
+						  else
+							  call error('rhs3d$','Illegal value of LES$')
+						  end if
 
 			              Mij(i,j,k,1) =  alpha_sq * RR2 * Sijh(i,j,k,1) - RR1 * f(i,j,k,4)
 			              Mij(i,j,k,2) =  alpha_sq * RR2 * Sijh(i,j,k,2) - RR1 * f(i,j,k,8)
@@ -1608,7 +1662,7 @@ subroutine rhs3d(ul, rl, fl, compute_max, uhl, Sijhl, Lijl, Mijl)
 			          call error("rhs3d$","Illegal value of average$")
 			        end if
 
-			        end if  ! LES.eq.-2
+			        end if  ! mod(LES,0).eq.0 dynamic models
 			  
 			  
 			  !.... find max velocity for CFL constraint
@@ -1629,24 +1683,45 @@ subroutine rhs3d(ul, rl, fl, compute_max, uhl, Sijhl, Lijl, Mijl)
 			  !.... Form nonlinear products (in physical space)
 
 			        s = zero
-			        !$omp parallel do private(k,j,i,S33,Rx,Ry,Rz,RR1,nu_e)
+			        !$omp parallel do private(k,j,i,S33,Rx,Ry,Rz,Q,lambdaCi,Delta,lambda2,RR1,nu_e)
 			        do k = 1, pz
 			          do j = 1, py
 			            do i = 1, px
 							S33 = -(f(i,j,k,4)+f(i,j,k,8))
-							call critR(f(i,j,k,4),f(i,j,k,5),f(i,j,k,6),f(i,j,k,7),f(i,j,k,8),&
-							f(i,j,k,9),f(i,j,k,10),f(i,j,k,11),S33,Rx,Ry,Rz)
-							RR1 = sqrt(Rx**2+Ry**2+Rz**2)
+							if(LES.eq.-1 .or. LES.eq.-2) then
+								call critR(f(i,j,k,4),f(i,j,k,5),f(i,j,k,6),f(i,j,k,7),f(i,j,k,8),&
+							         f(i,j,k,9),f(i,j,k,10),f(i,j,k,11),S33,Rx,Ry,Rz)
+							    RR1 = sqrt(Rx**2+Ry**2+Rz**2)
+	  						else if(LES.eq.-3 .or. LES.eq.-4) then
+	  							call critQ(f(i,j,k,4),f(i,j,k,5),f(i,j,k,6),f(i,j,k,7),f(i,j,k,8),&
+	  						         f(i,j,k,9),f(i,j,k,10),f(i,j,k,11),S33,Q)
+	  							RR1 = sqrt(max(0.,Q))
+	  						else if(LES.eq.-5 .or. LES.eq.-6) then
+	  							call critLambdaCi(f(i,j,k,4),f(i,j,k,5),f(i,j,k,6),f(i,j,k,7),f(i,j,k,8),&
+	  						         f(i,j,k,9),f(i,j,k,10),f(i,j,k,11),S33,lambdaCi)
+	  							RR1 = lambdaCi
+	  						else if(LES.eq.-7 .or. LES.eq.-8) then
+	  							call critDelta(f(i,j,k,4),f(i,j,k,5),f(i,j,k,6),f(i,j,k,7),f(i,j,k,8),&
+	  							     f(i,j,k,9),f(i,j,k,10),f(i,j,k,11),S33,Delta)
+	  							RR1 = (max(0.,Delta))**(1./6.)
+	  						else if(LES.eq.-9 .or. LES.eq.-10) then
+	  							call critLambda2(f(i,j,k,4),f(i,j,k,5),f(i,j,k,6),f(i,j,k,7),f(i,j,k,8),&
+	  								 f(i,j,k,9),f(i,j,k,10),f(i,j,k,11),S33,lambda2)
+	  							RR1 = sqrt(max(0.,-lambda2))
+	  						else
+	  							  call error('rhs3d$','Illegal value of LES$')
+	  						end if	
+														
 							nu_e = C(i,j,k) * delta_sq * RR1
-			              f(i,j,k,5) = f(i,j,k,1) * f(i,j,k,2) -  nu_e * (f(i,j,k,5)+f(i,j,k,7))
-			              f(i,j,k,7) = f(i,j,k,2) * f(i,j,k,3) -  nu_e * (f(i,j,k,9)+f(i,j,k,11))
-			              f(i,j,k,6) = f(i,j,k,1) * f(i,j,k,3) -  nu_e * (f(i,j,k,6)+f(i,j,k,10))
-			              f(i,j,k,1) = f(i,j,k,1) * f(i,j,k,1) -  two * nu_e * f(i,j,k,4)
-			              f(i,j,k,2) = f(i,j,k,2) * f(i,j,k,2) -  two * nu_e * f(i,j,k,8)
-			              f(i,j,k,3) = f(i,j,k,3) * f(i,j,k,3) -  two * nu_e * S33
+			                f(i,j,k,5) = f(i,j,k,1) * f(i,j,k,2) -  nu_e * (f(i,j,k,5)+f(i,j,k,7))
+			                f(i,j,k,7) = f(i,j,k,2) * f(i,j,k,3) -  nu_e * (f(i,j,k,9)+f(i,j,k,11))
+			                f(i,j,k,6) = f(i,j,k,1) * f(i,j,k,3) -  nu_e * (f(i,j,k,6)+f(i,j,k,10))
+			                f(i,j,k,1) = f(i,j,k,1) * f(i,j,k,1) -  two * nu_e * f(i,j,k,4)
+			                f(i,j,k,2) = f(i,j,k,2) * f(i,j,k,2) -  two * nu_e * f(i,j,k,8)
+			                f(i,j,k,3) = f(i,j,k,3) * f(i,j,k,3) -  two * nu_e * S33
                     
-                    f(i,j,k,4) = f(i,j,k,5)
-                    f(i,j,k,5) = f(i,j,k,7)
+                            f(i,j,k,4) = f(i,j,k,5)
+                            f(i,j,k,5) = f(i,j,k,7)
 			            end do
 			          end do
 			        end do
@@ -1660,8 +1735,6 @@ subroutine rhs3d(ul, rl, fl, compute_max, uhl, Sijhl, Lijl, Mijl)
 			  !.... convert from anti-aliased 3/2 field to regular field (in place)
 
 			        call unpad( 2*ndof, nx, ny, nz, px, py, pz, fl )
-		  
-		  
      
       else   ! DNS
 
